@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
@@ -17,7 +17,7 @@ namespace WebServer.Server.HTTP
         public string this[string name]
         {
             get => cookies[name].Value;
-            set => cookies[name] = new Cookie(name, value);
+            set => cookies[name] = new Cookie(name ,value);
         }
         public void Add(string name, string value)
         {
