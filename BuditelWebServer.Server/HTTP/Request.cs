@@ -105,7 +105,7 @@ namespace WebServer.Server.HTTP_Request
             var formCollection = new Dictionary<string, string>();
 
             if (headers.Contains(Header.ContentType)
-                && headers[Header.ContentType] == ContentType.FormUrlEncodet)
+                && headers[Header.ContentType] == ContentType.FormUrlEncoded)
             {
                 var parsedForm = ParseFormData(body);
 
