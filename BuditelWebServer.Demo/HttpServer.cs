@@ -1,101 +1,110 @@
-﻿using BuditelWebServer.Server.Contracts;
+﻿
+using BuditelWebServer.Server.Contracts;
 using BuditelWebServer.Server.HTTP;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Data;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection.Metadata;
 using System.Text;
 using System.Threading.Tasks;
+using WebServer.Server.Contracts;
+using WebServer.Server.HTTP;
+using WebServer.Server.HTTP_Request;
 
-namespace BuditelWebServer.Server
+namespace WebServer.Server
 {
-	public class HttpServer
-	{
-		private readonly IPAddress ipAddress;
-		private readonly int port;
-		private readonly TcpListener serverListener;
+    public class HttpServer
+    {
+        private readonly IPAddress ipAddress;
+        private readonly int port;
+        private readonly TcpListener serverListener;
+        private readonly RoutingTable routingTable;
 
-		private readonly RoutingTable routes;
+        public HttpServer(string ipAddress, int port, Action<IRoutingTable> routingTableConfiguration)
+        {
 
-		public HttpServer(string ipAddress, int port
-			,Action<IRoutingTable> routingTableConfigurtion)
-		{
-			this.ipAddress = IPAddress.Parse(ipAddress);
-			this.port = port;
-			this.serverListener = new TcpListener(this.ipAddress,this.port);
+            this.ipAddress = IPAddress.Parse(ipAddress);
+            this.port = port;
+            this.serverListener = new TcpListener(this.ipAddress, port);
 
+            routingTableConfiguration(this.routingTable = new RoutingTable());
 
-			routingTableConfigurtion(routes = new RoutingTable());
-		}
+        }
 
-		public HttpServer(int port, Action<IRoutingTable> routes)
-			:this("127.0.0.1",port,routes)
-		{
-			
-		}
-		public HttpServer(Action<IRoutingTable> routes)
-			:this(8080,routes)
-		{
-			
-		}
+        public HttpServer(int port, Action<IRoutingTable> routes)
+            : this("127.0.0.1", port, routes)
+        {
+        }
 
-		public void Start()
-		{
-			this.serverListener.Start();
+        public HttpServer(Action<IRoutingTable> routingTable)
+            : this(8080, routingTable)
+        {
+        }
 
-			Console.WriteLine($"Server started on port {port}");
-			Console.WriteLine($"Listening for requests...");
-			while (true)
-			{
-				var connection = serverListener.AcceptTcpClient();
-				var networkStream = connection.GetStream();
+        public async Task Start()
+        {
+            this.serverListener.Start();
 
-				var requestText = ReadRequest(networkStream);
-                Console.WriteLine(requestText);
-				var request = Request.Parse(requestText);
-				var response = routes.MatchRequest(request);
-				if(response.PreRnderAction != null)
-				{
-					response.PreRnderAction(request, response);
-				}
+            Console.WriteLine($"Server started on port {port}");
+            Console.WriteLine("Listening for requests ... ");
+            while (true)
+            {
+                var connection = await serverListener.AcceptTcpClientAsync();
 
-                WriteResponse(networkStream, response);
-                connection.Close();
+                _ = Task.Run(async () =>
+                {
+                    var networkStream = connection.GetStream();
+                    var requestText = await ReadRequest(networkStream);
+                    Console.WriteLine(requestText);
+                    var request = Request.Parse(requestText);
+                    var response = routingTable.MatchRequest(request);
+                    if (response.PreRenderAction != null)
+                    {
+                        response.PreRenderAction(request, response);
+                    }
+                    AddSession(request, response);
+                    await WriteResponse(networkStream, response);
+                    connection.Close();
+                });
+
             }
-		}
+        }
 
-		
+        private static void AddSession(Request request, Response response)
+        {
+            var sessionExists = request.Session
+                .ContainsKey(Session.SessionCurrentDateKey);
+            if (!sessionExists)
+            {
+                request.Session[Session.SessionCurrentDateKey] = DateTime.Now.ToString();
+                response.Cookies.Add(Session.SessionCookieName, request.Session.Id);
+            }
+        }
 
-		private void WriteResponse(NetworkStream networkStream, Response response)
-		{
-			var responseBytes = Encoding.UTF8.GetBytes(response.ToString());
-			networkStream.Write(responseBytes);
-		}
+        private async Task WriteResponse(NetworkStream networkStream, Response response)
+        {
+            var responseBytes = Encoding.UTF8.GetBytes(response.ToString());
+            await networkStream.WriteAsync(responseBytes);
+        }
 
-		private string ReadRequest(NetworkStream networkStream)
-		{
-			var bufferLength = 1024;
-			var buffer = new byte[bufferLength];
+        private async Task<string> ReadRequest(NetworkStream networkStream)
+        {
+            var bufferLingth = 1024;
+            var buffer = new byte[bufferLingth];
+            var totalBayts = 0;
+            var requestBuilder = new StringBuilder();
+            do
+            {
+                var bytesRead = await networkStream.ReadAsync(buffer, 0, bufferLingth);
+                totalBayts += bytesRead;
+                if (totalBayts > 10 * 1024)
+                {
+                    throw new InvalidDataException("Request is to lorge.");
+                }
+                requestBuilder.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
+            }
+            while (networkStream.DataAvailable);
 
-			var totalBytes = 0;
-
-			var requestBuilder = new StringBuilder();
-
-			do
-			{
-				var bytesRead = networkStream.Read(buffer, 0, bufferLength);
-				totalBytes+= bytesRead;
-				if (totalBytes > 10 * 1024)
-				{
-					throw new InvalidDataException("Request is too large.");
-				}
-				requestBuilder.Append(Encoding.UTF8.GetString(buffer,0,bytesRead));
-			}
-			while (networkStream.DataAvailable);
-
-			return requestBuilder.ToString();
-		}
-	}
+            return requestBuilder.ToString();
+        }
+    }
 }
